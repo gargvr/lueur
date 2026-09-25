@@ -30,11 +30,13 @@ export function generate(persona = "shift", nDays = 63, endDate = isoDate(new Da
     const sleepMin = 445 + (weekend ? 30 : 0) - p * 70 + gauss(r) * (24 + p * 10);    // 7h25 -> ~6h15
     const steps = (weekend ? 9400 : 8100) * (1 - p * 0.5) + gauss(r) * 1500;          // ~8.3k -> ~4.2k
     const places = Math.round(clamp((weekend ? 3.6 : 3) * (1 - p * 0.55) + gauss(r) * 0.9, 0, 8));
+    const homeStay = Math.round(clamp((weekend ? 62 : 55) + p * 28 + gauss(r) * 5, 20, 98));     // % of day at home
+    const rangeKm = Math.round(clamp((weekend ? 8 : 6) * (1 - p * 0.6) + gauss(r) * 1.1, 0.3, 40) * 10) / 10;
     const checked = r() < 0.82;
     const mood = checked ? Math.round(clamp(3.8 - p * 1.5 + gauss(r) * 0.6, 1, 5)) : undefined;
     const energy = checked ? Math.round(clamp(3.7 - p * 2 + gauss(r) * 0.55, 1, 5)) : undefined;
 
-    const day = { date, onset: Math.round(onset), sleepMin: Math.round(sleepMin), steps: Math.max(300, Math.round(steps)), places, source: "demo" };
+    const day = { date, onset: Math.round(onset), sleepMin: Math.round(sleepMin), steps: Math.max(300, Math.round(steps)), places, homeStay, rangeKm, source: "demo" };
     if (mood) { day.mood = mood; day.energy = energy; }
     if (persona === "steady" && i >= 30 && i <= 33) day.tags = ["travel"];
     if (persona === "shift" && i === 12) day.tags = ["ill"];

@@ -17,6 +17,7 @@ export const native = {
   previewNotification: safe(() => P.previewNotification()),
   wipe: safe(() => P.wipe()),
   debugSeed: safe(() => P.debugSeed()),
+  requestLocation: safe(() => P.requestLocation()),
   // Returns Lueur-shaped days: { date, steps, sleepMin, onset, source }
   sync: safe(async (days = 60) => {
     const r = await P.sync({ days });
@@ -25,7 +26,7 @@ export const native = {
       if (d.steps != null) out.steps = d.steps;
       if (d.sleepMin != null) out.sleepMin = d.sleepMin;
       if (d.onset != null) out.onset = d.onset;
-      for (const k of ["restingHR", "hrv", "daylight", "exercise", "moodHealth"]) if (d[k] != null) out[k] = d[k];
+      for (const k of ["restingHR", "hrv", "daylight", "exercise", "moodHealth", "places", "homeStay", "rangeKm"]) if (d[k] != null) out[k] = d[k];
       out.sleepSrc = d.sleepSrc; out.stepsSrc = d.stepsSrc;
       out.source = platform === "ios" ? "apple_health" : d.sleepSrc === "health_connect" || d.stepsSrc === "health_connect" ? "health_connect" : "phone";
       return out;

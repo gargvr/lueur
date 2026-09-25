@@ -17,6 +17,9 @@ export const SIGNALS = [
   { key: "steps",        label: "Movement",        bad: "down", floor: 900, fmt: v => `${fmtInt(v)} steps`, source: "steps" },
   { key: "exercise",     label: "Active minutes", bad: "down", floor: 5, fmt: v => `${Math.round(v)} min`, source: "steps" },
   { key: "places",       label: "Places",          bad: "down", floor: 0.7, fmt: v => `${(Math.round(v * 10) / 10).toString()} a day`, source: "places" },
+  // Saeb et al. 2015/2016: more time at home and a smaller range of movement tracked depressive symptoms
+  { key: "homeStay",     label: "Time at home",    bad: "up",   floor: 5,   fmt: v => `${Math.round(v)}%`, source: "places" },
+  { key: "rangeKm",      label: "Range",           bad: "down", floor: 0.5, fmt: v => `${Math.round(v * 10) / 10} km`, source: "places" },
   // Apple Watch / wearables (added for the iPhone app; Health Connect can supply them too)
   { key: "restingHR",    label: "Resting heart", bad: "up",   floor: 2,   fmt: v => `${Math.round(v)} bpm`, source: "heart" },
   { key: "hrv",          label: "Heart variability", bad: "down", floor: 5, fmt: v => `${Math.round(v)} ms`, source: "heart" },
@@ -147,7 +150,9 @@ export function factFor(s) {
     case "onset": return `Bedtime: falling asleep around ${fmtClock(r)}, about ${fmtDelta(Math.abs(r - c))} ${r > c ? "later" : "earlier"} than your usual ${fmtClock(c)}.`;
     case "irregularity": return `Sleep rhythm: bedtime has varied by about ±${Math.round(r)} minutes night to night, versus your usual ±${Math.round(c)}.`;
     case "steps": return `Movement: about ${fmtInt(r)} steps a day, down from your usual ${fmtInt(c)}.`;
-    case "places": return `Places: about ${Math.round(r * 10) / 10} places a day, fewer than your usual ${Math.round(c * 10) / 10}.`;
+    case "homeStay": return `Time at home: about ${Math.round(r)}% of the day lately, more than your usual ${Math.round(c)}%.`;
+    case "rangeKm": return `Range: you've moved within about ${Math.round(r * 10) / 10} km of your day's centre, less than your usual ${Math.round(c * 10) / 10} km.`;
+    case "places": return `Places: about ${Math.round(r * 10) / 10} ${Math.round(r * 10) / 10 === 1 ? "place" : "places"} a day, fewer than your usual ${Math.round(c * 10) / 10}.`;
     case "exercise": return `Active minutes: about ${Math.round(r)} a day, down from your usual ${Math.round(c)}.`;
     case "restingHR": return `Resting heart rate, a sign of how rested your body is: around ${Math.round(r)} bpm lately, higher than your usual ${Math.round(c)}.`;
     case "hrv": return `Heart rate variability: around ${Math.round(r)} ms lately, lower than your usual ${Math.round(c)}.`;

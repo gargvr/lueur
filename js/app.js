@@ -132,6 +132,7 @@ function connectRows() {
     return `${row("Apple Health", s.health === "available"
         ? "Steps (every iPhone counts them), plus sleep, active minutes, resting heart rate, heart rate variability and time in daylight from an Apple Watch or any app that writes to Health, and moods you log in Health. Read-only. iOS lets you choose each one."
         : "Apple Health isn't available on this device.", s.healthRequested ? "Asked" : false, "nConnectHC", "Connect")}
+      ${row("Places and time at home", "iOS tells Lueur when you arrive at or leave a place. Each day becomes three numbers (places, time at home, how far you ranged) and the locations are deleted. Choose <b>Always</b> when asked.", s.locationAlways ? true : s.location ? "While using" : false, "nLocation", "Allow")}
       ${row("Gentle notes", "At most one quiet note a week, delivered silently to Notification Center.", s.notifications, "nNotify", "Allow")}`;
   }
   const row = (title, desc, ok, act, label) => `<div class="toggle-row"><div class="txt"><b>${title}</b><span class="small muted">${desc}</span></div>
@@ -142,6 +143,7 @@ function connectRows() {
   return `${row("Health Connect", hcDesc, s.hcSteps || s.hcSleep, "nConnectHC", s.healthConnect === "update_required" ? "Install" : "Connect")}
     ${row("Sleep, without a wearable", "Estimates your night from how long the screen stays off. Android calls this Usage access; only screen on/off times are read, never app content.", s.usageAccess, "nUsage", "Open settings")}
     ${s.stepSensor ? row("Steps, from this phone", "Uses the phone's own step counter, checked about once an hour.", s.activity, "nActivity", "Allow") : ""}
+    ${row("Places and time at home", "A coarse location about once an hour. Each day becomes three numbers (places, time at home, how far you ranged) and the locations are deleted. Choose <b>Allow all the time</b> on the next screen.", s.locationAlways ? true : false, "nLocation", s.location ? "Allow all the time" : "Allow")}
     ${row("Gentle notes", "At most one quiet notification a week, only after a shift that lasts. No sound.", s.notifications, "nNotify", "Allow")}`;
 }
 
@@ -174,7 +176,8 @@ function deltaFor(sig) {
 const GOALS = [
   { id: "daylight", text: "Ten minutes outside in daylight", when: s => ["steps", "places", "mood", "energy"].includes(s.key) },
   { id: "winddown", text: "Start winding down 20 minutes earlier", when: s => ["onset", "irregularity", "sleepMin"].includes(s.key) },
-  { id: "message", text: "Send one message to someone you like", when: s => ["places", "mood"].includes(s.key) },
+  { id: "message", text: "Send one message to someone you like", when: s => ["places", "homeStay", "mood"].includes(s.key) },
+  { id: "outing", text: "Go somewhere new-ish for twenty minutes: a café, a park, a different street", when: s => ["places", "homeStay", "rangeKm"].includes(s.key) },
   { id: "breathe", text: "One minute of slow breathing", when: () => true, act: "breathe" },
   { id: "water", text: "A glass of water and something to eat", when: s => ["energy", "mood"].includes(s.key) },
 ];
@@ -317,7 +320,7 @@ function privacyScreen() {
     <div class="card"><h3>What Lueur may notice</h3><p class="small muted">Change your mind any time. Turning a signal off stops using it straight away.</p>
       ${toggle("sleep", "Sleep", `Duration, bedtime and regularity, ${platform === "ios" ? "from Apple Health" : isNative ? "from Health Connect or this phone" : "from a file you import"}.`)}
       ${toggle("steps", "Movement", `Daily steps${platform === "ios" ? " and active minutes, from Apple Health" : isNative ? ", from Health Connect or this phone" : ", from a file you import"}.`)}
-      ${toggle("places", "Places", "While Lueur is open, counts different places per day. Coordinates are discarded.")}
+      ${toggle("places", "Places", isNative ? "Places visited, time at home and how far you range. Each day is reduced to those three numbers and the locations are deleted." : "While Lueur is open, counts different places per day. Coordinates are discarded.")}
       ${toggle("checkin", "Daily check-in", "Two taps for mood and energy.")}
       ${platform === "ios" || S.days.some(d => d.restingHR != null || d.hrv != null) ? toggle("heart", "Heart", "Resting heart rate and heart rate variability, from a watch or ring.") : ""}
       ${platform === "ios" || S.days.some(d => d.daylight != null) ? toggle("daylight", "Daylight", "Minutes spent in daylight, measured by Apple Watch.") : ""}
@@ -386,7 +389,7 @@ function onboarding() {
      <div class="stack"><button class="btn block" data-act="next">Continue</button><button class="linkbtn" data-act="back">Back</button></div>`,
     `<div class="stack"><p class="eyebrow">Your choice</p><h1>What may Lueur notice?</h1><p class="muted small">Everything starts off. Turn on only what you're comfortable with.</p></div>
      <div class="card">
-      ${[["sleep", "Sleep", platform === "ios" ? "From Apple Health: an Apple Watch or any sleep app" : isNative ? "From Health Connect, or estimated from your screen's night-time pattern" : "From a sleep tracker file you import"], ["steps", "Movement", platform === "ios" ? "Steps and active minutes from Apple Health; every iPhone counts steps" : isNative ? "Daily steps from Health Connect or this phone" : "Daily steps, from a file you import"], ...(platform === "ios" ? [["heart", "Heart", "Resting heart rate and heart rate variability, from Apple Watch"], ["daylight", "Daylight", "Minutes in daylight, measured by Apple Watch"]] : []), ["places", "Places", "A daily count while Lueur is open; never where"], ["checkin", "Daily check-in", "Two taps: mood and energy"]].map(([k, t, d]) =>
+      ${[["sleep", "Sleep", platform === "ios" ? "From Apple Health: an Apple Watch or any sleep app" : isNative ? "From Health Connect, or estimated from your screen's night-time pattern" : "From a sleep tracker file you import"], ["steps", "Movement", platform === "ios" ? "Steps and active minutes from Apple Health; every iPhone counts steps" : isNative ? "Daily steps from Health Connect or this phone" : "Daily steps, from a file you import"], ...(platform === "ios" ? [["heart", "Heart", "Resting heart rate and heart rate variability, from Apple Watch"], ["daylight", "Daylight", "Minutes in daylight, measured by Apple Watch"]] : []), ["places", "Places", isNative ? "Places visited, time at home and how far you range; never where" : "A daily count while Lueur is open; never where"], ["checkin", "Daily check-in", "Two taps: mood and energy"]].map(([k, t, d]) =>
         `<div class="toggle-row"><div class="txt"><b>${t}</b><span class="small muted">${d}</span></div><label class="toggle"><input type="checkbox" data-act="consent" data-arg="${k}" ${c[k] ? "checked" : ""} aria-label="${t}"><span></span></label></div>`).join("")}
      </div>
      <label class="row small" style="align-items:flex-start"><input type="checkbox" id="agree" data-act="agree" ${c.agreedAt ? "checked" : ""} style="margin-top:4px;width:20px;height:20px">
@@ -620,7 +623,7 @@ async function act(name, arg, el, ev) {
     case "consent": {
       const consent = { ...S.settings.consent, [arg]: el.checked };
       await saveSettings({ consent });
-      if (arg === "places") el.checked ? startPlaces(() => refresh({ regenerate: false })) : stopPlaces();
+      if (arg === "places" && !isNative) el.checked ? startPlaces(() => refresh({ regenerate: false })) : stopPlaces();
       if (S.settings.onboarded) await refresh(); else render();
       break;
     }
@@ -677,6 +680,15 @@ async function act(name, arg, el, ev) {
     case "nConnectHC": { const r = await native.requestHealth(); await nativeStatus(); render(); if (r?.granted) { await nativeSync({ quiet: false }); await refresh(); } break; }
     case "nUsage": S.awaitingUsage = true; await native.openUsageAccess(); break;
     case "nActivity": await native.requestActivity(); await nativeStatus(); render(); break;
+    case "nLocation": {
+      const r = await native.requestLocation();
+      await saveSettings({ consent: { ...S.settings.consent, places: true } });
+      if (r?.needsSettings) toast(platform === "ios" ? "In Settings, set Location to Always" : "Set Location to “Allow all the time”");
+      await nativeStatus(); render();
+      // iOS answers the "Always" upgrade a moment later; re-check so the label is right
+      setTimeout(async () => { await nativeStatus(); render(); }, 2500);
+      break;
+    }
     case "nNotify": await native.requestNotifications(); await nativeStatus(); render(); break;
     case "nSeed": { const r = await native.debugSeed(); if (r?.seeded) { toast(`Wrote ${r.seeded} sample days to ${platform === "ios" ? "Apple Health" : "Health Connect"}`); await nativeSync({ quiet: false }); await refresh(); } break; }
     case "nPreview": await native.previewNotification(); toast("Sent a sample note"); break;
@@ -710,7 +722,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && S.sheet) {
   try { await prune(); } catch {}
   if (isNative) { await nativeStatus(); if (S.settings.onboarded) await nativeSync(); }
   await refresh();
-  if (S.settings.onboarded && S.settings.consent.places) startPlaces(() => refresh({ regenerate: false }));
+  if (!isNative && S.settings.onboarded && S.settings.consent.places) startPlaces(() => refresh({ regenerate: false }));
   if (!isNative && "serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
   // coming back from Android settings, or reopening the app: re-check and sync
   if (isNative) document.addEventListener("visibilitychange", async () => {

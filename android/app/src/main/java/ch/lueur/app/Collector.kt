@@ -40,6 +40,7 @@ data class Day(
     var steps: Long? = null, var stepsSrc: String? = null,
     var sleepMin: Int? = null, var onset: Int? = null, var sleepSrc: String? = null,
     var nightUnlocks: Int? = null,
+    var places: Int? = null, var homeStay: Int? = null, var rangeKm: Double? = null,
 )
 
 object Collector {
@@ -65,6 +66,9 @@ object Collector {
                     sleepMin = if (o.has("sleepMin")) o.getInt("sleepMin") else null,
                     onset = if (o.has("onset")) o.getInt("onset") else null, sleepSrc = o.optString("sleepSrc", null),
                     nightUnlocks = if (o.has("nightUnlocks")) o.getInt("nightUnlocks") else null,
+                    places = if (o.has("places")) o.getInt("places") else null,
+                    homeStay = if (o.has("homeStay")) o.getInt("homeStay") else null,
+                    rangeKm = if (o.has("rangeKm")) o.getDouble("rangeKm") else null,
                 )
             }
         }
@@ -88,6 +92,7 @@ object Collector {
         d.steps?.let { put("steps", it) }; d.stepsSrc?.let { put("stepsSrc", it) }
         d.sleepMin?.let { put("sleepMin", it) }; d.onset?.let { put("onset", it) }; d.sleepSrc?.let { put("sleepSrc", it) }
         d.nightUnlocks?.let { put("nightUnlocks", it) }
+        d.places?.let { put("places", it) }; d.homeStay?.let { put("homeStay", it) }; d.rangeKm?.let { put("rangeKm", it) }
     }
 
     // ---------- availability ----------

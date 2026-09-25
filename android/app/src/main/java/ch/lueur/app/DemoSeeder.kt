@@ -56,6 +56,18 @@ object DemoSeeder {
             )
         }
         client.insertRecords(records)
+        // location numbers go straight into Lueur's own store (Health Connect has no such record)
+        val store = Collector.load(ctx)
+        for (i in days downTo 1) {
+            val day = today.minusDays(i.toLong())
+            val p = if (i <= 21) minOf(1.0, (22 - i) / 12.0) else 0.0
+            val we = day.dayOfWeek.value >= 6
+            val d = store.getOrPut(day.toString()) { Day() }
+            d.places = maxOf(1, Math.round((if (we) 3.6 else 3.0) * (1 - p * 0.55) + g() * 0.6).toInt())
+            d.homeStay = minOf(98, Math.round((if (we) 62 else 55) + p * 28 + g() * 5).toInt())
+            d.rangeKm = maxOf(0.3, Math.round(((if (we) 8.0 else 6.0) * (1 - p * 0.6) + g() * 1.0) * 10) / 10.0)
+        }
+        Collector.save(ctx, store)
         return days
     }
 }

@@ -9,6 +9,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Re-arm the Health observers so iOS can wake Lueur when new sleep or steps arrive.
         LueurNotes.startBackgroundDelivery()
+        // iOS relaunches the app for visits / big moves; restart monitoring so none are lost.
+        LueurLocation.shared.start()
         return true
     }
 

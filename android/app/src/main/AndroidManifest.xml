@@ -68,8 +68,10 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <!-- No wearable: the phone's own step counter -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <!-- Places, only while the app is open; coordinates are hashed and discarded -->
+    <!-- Places: coarse location, hashed and reduced to daily numbers -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Hourly coarse sample in the background; reduced nightly to places / time at home / range, then deleted -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- One gentle notification at most once a week -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

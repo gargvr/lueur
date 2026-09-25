@@ -34,6 +34,9 @@ object DriftCheck {
         Sig("onset", "up", 25.0) { d, k -> d[k]?.onset?.toDouble() },
         Sig("irregularity", "up", 12.0) { d, k -> irregularity(d, k) },
         Sig("steps", "down", 900.0) { d, k -> d[k]?.steps?.toDouble() },
+        Sig("places", "down", 0.7) { d, k -> d[k]?.places?.toDouble() },
+        Sig("homeStay", "up", 5.0) { d, k -> d[k]?.homeStay?.toDouble() },
+        Sig("rangeKm", "down", 0.5) { d, k -> d[k]?.rangeKm },
     )
 
     /** Number of sensor signals that have clearly shifted over the last two weeks. */

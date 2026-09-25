@@ -35,6 +35,7 @@ class DailyWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
             runCatching { Collector.sampleStepCounter(ctx) }
         }
+        runCatching { LocationDay.sample(ctx) }
         val today = LocalDate.now().toString()
         if (prefs.getString("lastCollect", null) != today) {
             runCatching { Collector.collect(ctx, 45) }

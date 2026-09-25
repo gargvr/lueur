@@ -1,5 +1,8 @@
 import Foundation
+import UIKit
 import Capacitor
+import CoreLocation
+import CryptoKit
 import HealthKit
 import UserNotifications
 
@@ -19,6 +22,7 @@ class LueurBridgeViewController: CAPBridgeViewController {
 struct LueurDay {
     var steps: Double?; var sleepMin: Double?; var onset: Double?
     var restingHR: Double?; var hrv: Double?; var daylight: Double?; var exercise: Double?; var moodHealth: Double?
+    var places: Double?; var homeStay: Double?; var rangeKm: Double?
 
     var json: [String: Any] {
         var o: [String: Any] = [:]
@@ -30,6 +34,9 @@ struct LueurDay {
         if let v = daylight { o["daylight"] = Int(v.rounded()) }
         if let v = exercise { o["exercise"] = Int(v.rounded()) }
         if let v = moodHealth { o["moodHealth"] = (v * 10).rounded() / 10 }
+        if let v = places { o["places"] = Int(v) }
+        if let v = homeStay { o["homeStay"] = Int(v) }
+        if let v = rangeKm { o["rangeKm"] = v }
         return o
     }
 }
@@ -141,6 +148,9 @@ enum LueurHealth {
         for (k, v) in await exercise { out[k, default: LueurDay()].exercise = v }
         for (k, v) in await sleep { out[k, default: LueurDay()].sleepMin = v.min; out[k, default: LueurDay()].onset = v.onset }
         for (k, v) in await mood { out[k, default: LueurDay()].moodHealth = v }
+        for (k, v) in LueurLocation.shared.days {
+            out[k, default: LueurDay()].places = v["places"]; out[k, default: LueurDay()].homeStay = v["homeStay"]; out[k, default: LueurDay()].rangeKm = v["rangeKm"]
+        }
         return out
     }
 }
@@ -169,6 +179,9 @@ enum LueurDrift {
             ("down", 5, { days[key($0)]?.hrv }),
             ("down", 10, { days[key($0)]?.daylight }),
             ("down", 5, { days[key($0)]?.exercise }),
+            ("down", 0.7, { days[key($0)]?.places }),
+            ("up", 5, { days[key($0)]?.homeStay }),
+            ("down", 0.5, { days[key($0)]?.rangeKm }),
         ]
         var shifted = 0
         for (dir, floor, get) in signals {
@@ -238,6 +251,7 @@ public class LueurHealthPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "previewNotification", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "wipe", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "debugSeed", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestLocation", returnType: CAPPluginReturnPromise),
     ]
     private let d = UserDefaults.standard
 
@@ -260,6 +274,8 @@ public class LueurHealthPlugin: CAPPlugin, CAPBridgedPlugin {
                 "healthRequested": d.bool(forKey: "lueur.healthRequested"),
                 "notifications": settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional,
                 "debug": isDebug,
+                "location": LueurLocation.shared.status == "always" || LueurLocation.shared.status == "whenInUse",
+                "locationAlways": LueurLocation.shared.status == "always",
                 "sensorShifts": LueurDrift.shiftedCount(days),
             ])
         }
@@ -292,10 +308,24 @@ public class LueurHealthPlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve()
     }
 
+    @objc func requestLocation(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            let loc = LueurLocation.shared
+            if loc.status == "always" { loc.start(); call.resolve(["granted": true]); return }
+            if loc.status == "denied" {
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                call.resolve(["granted": false, "needsSettings": true]); return
+            }
+            loc.onAuthChange = { loc.onAuthChange = nil; call.resolve(["granted": loc.status != "denied" && loc.status != "notDetermined", "status": loc.status]) }
+            loc.request()
+        }
+    }
+
     @objc func previewNotification(_ call: CAPPluginCall) { LueurNotes.show(); call.resolve() }
 
     @objc func wipe(_ call: CAPPluginCall) {
         for k in ["lueur.healthRequested", "lueur.snoozeUntil", "lueur.notify", "lueur.lastCheck", "lueur.lastNotified"] { d.removeObject(forKey: k) }
+        DispatchQueue.main.async { LueurLocation.shared.wipe() }
         call.resolve()
     }
 
@@ -308,10 +338,28 @@ public class LueurHealthPlugin: CAPPlugin, CAPBridgedPlugin {
         LueurHealth.store.requestAuthorization(toShare: share, read: LueurHealth.readTypes) { ok, _ in
             guard ok else { call.resolve(["seeded": 0]); return }
             self.d.set(true, forKey: "lueur.healthRequested")
+            Self.seedLocationDays()
             LueurHealth.store.save(Self.sampleData()) { saved, err in
                 call.resolve(["seeded": saved ? 42 : 0, "error": err?.localizedDescription ?? ""])
             }
         }
+    }
+
+    /// Debug only: six weeks of daily location numbers with the same gradual shift.
+    private static func seedLocationDays() {
+        let cal = Calendar.current; var out: [String: [String: Double]] = [:]
+        let today = cal.startOfDay(for: Date())
+        for i in stride(from: 42, through: 1, by: -1) {
+            let day = cal.date(byAdding: .day, value: -i, to: today)!
+            let p = i <= 21 ? min(1.0, Double(22 - i) / 12.0) : 0
+            let we = cal.isDateInWeekend(day)
+            out[LueurHealth.dayKey(day)] = [
+                "places": max(1, ((we ? 3.6 : 3.0) * (1 - p * 0.55) + Double.random(in: -0.9...0.9)).rounded()),
+                "homeStay": min(98, (we ? 62 : 55) + p * 28 + Double.random(in: -6...6)).rounded(),
+                "rangeKm": max(0.3, ((we ? 8.0 : 6.0) * (1 - p * 0.6) + Double.random(in: -1.2...1.2)) * 10).rounded() / 10,
+            ]
+        }
+        UserDefaults.standard.set(out, forKey: "lueur.locDays")
     }
 
     private static func sampleData() -> [HKObject] {
@@ -341,5 +389,120 @@ public class LueurHealthPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
         return out
+    }
+}
+
+// MARK: - Location (visits), reduced to three numbers a day
+
+
+/// iOS tells us when you arrive at and leave a place ("visits") and about big moves, at very low
+/// battery cost. Points are coarsened to ~110 m and kept only until their day is over; then each day
+/// becomes: places (distinct spots), homeStay (% of the day at home), rangeKm (radius of gyration).
+/// Home is kept only as a salted hash of a coarse cell, never as a place.
+final class LueurLocation: NSObject, CLLocationManagerDelegate {
+    static let shared = LueurLocation()
+    private let lm = CLLocationManager()
+    private let d = UserDefaults.standard
+    var onAuthChange: (() -> Void)?
+
+    override init() { super.init(); lm.delegate = self }
+
+    var status: String {
+        switch lm.authorizationStatus {
+        case .authorizedAlways: return "always"
+        case .authorizedWhenInUse: return "whenInUse"
+        case .denied, .restricted: return "denied"
+        default: return "notDetermined"
+        }
+    }
+
+    func request() {
+        if lm.authorizationStatus == .notDetermined { lm.requestWhenInUseAuthorization() }
+        else if lm.authorizationStatus == .authorizedWhenInUse { lm.requestAlwaysAuthorization() }
+        start()
+    }
+
+    func start() {
+        guard lm.authorizationStatus == .authorizedAlways || lm.authorizationStatus == .authorizedWhenInUse else { return }
+        lm.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        lm.startMonitoringVisits()
+        lm.startMonitoringSignificantLocationChanges()
+    }
+
+    func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+        if m.authorizationStatus == .authorizedWhenInUse { m.requestAlwaysAuthorization() }
+        start(); onAuthChange?()
+    }
+
+    func locationManager(_ m: CLLocationManager, didVisit v: CLVisit) {
+        let dep = v.departureDate == .distantFuture ? Date() : v.departureDate
+        let arr = v.arrivalDate == .distantPast ? dep : v.arrivalDate
+        append(lat: v.coordinate.latitude, lon: v.coordinate.longitude, from: arr, to: dep)
+    }
+
+    func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
+        for l in locs { append(lat: l.coordinate.latitude, lon: l.coordinate.longitude, from: l.timestamp, to: l.timestamp) }
+    }
+
+    // MARK: storage
+
+    private func salt() -> String {
+        if let s = d.string(forKey: "lueur.locSalt") { return s }
+        let s = UUID().uuidString; d.set(s, forKey: "lueur.locSalt"); return s
+    }
+    private func cell(_ lat: Double, _ lon: Double) -> String {
+        let key = "\(salt()):\(String(format: "%.3f", lat)):\(String(format: "%.3f", lon))"
+        return SHA256.hash(data: Data(key.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func append(lat: Double, lon: Double, from: Date, to: Date) {
+        var pts = d.array(forKey: "lueur.locPoints") as? [[String: Any]] ?? []
+        pts.append(["lat": (lat * 1000).rounded() / 1000, "lon": (lon * 1000).rounded() / 1000,
+                    "a": from.timeIntervalSince1970, "b": to.timeIntervalSince1970, "c": cell(lat, lon)])
+        d.set(pts, forKey: "lueur.locPoints")
+        reduceFinishedDays()
+    }
+
+    /// Turns every finished day into three numbers and deletes its coordinates.
+    func reduceFinishedDays() {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var pts = d.array(forKey: "lueur.locPoints") as? [[String: Any]] ?? []
+        var out = d.dictionary(forKey: "lueur.locDays") as? [String: [String: Double]] ?? [:]
+        var votes = d.dictionary(forKey: "lueur.homeVotes") as? [String: Int] ?? [:]
+        let byDay = Dictionary(grouping: pts) { cal.startOfDay(for: Date(timeIntervalSince1970: $0["b"] as! Double)) }
+        for (day, list) in byDay where day < today {
+            let dayEnd = day.addingTimeInterval(86400)
+            // home = the cell most often occupied at 03:00
+            let three = day.addingTimeInterval(3 * 3600)
+            for p in list where (p["a"] as! Double) <= three.timeIntervalSince1970 && (p["b"] as! Double) >= three.timeIntervalSince1970 {
+                votes[p["c"] as! String, default: 0] += 1
+            }
+            let home = votes.max { $0.value < $1.value }?.key
+            var homeSecs = 0.0
+            for p in list where p["c"] as? String == home {
+                let a = max(p["a"] as! Double, day.timeIntervalSince1970), b = min(p["b"] as! Double, dayEnd.timeIntervalSince1970)
+                if b > a { homeSecs += b - a }
+            }
+            let lats = list.map { $0["lat"] as! Double }, lons = list.map { $0["lon"] as! Double }
+            let mLat = lats.reduce(0, +) / Double(lats.count), mLon = lons.reduce(0, +) / Double(lons.count)
+            let kx = 111.32 * cos(mLat * .pi / 180)
+            let rg = (zip(lats, lons).map { pow(($0.1 - mLon) * kx, 2) + pow(($0.0 - mLat) * 110.57, 2) }.reduce(0, +) / Double(lats.count)).squareRoot()
+            var row: [String: Double] = ["places": Double(Set(list.map { $0["c"] as! String }).count), "rangeKm": (rg * 10).rounded() / 10]
+            if home != nil { row["homeStay"] = (100 * homeSecs / 86400).rounded() }
+            out[LueurHealth.dayKey(day)] = row
+        }
+        pts.removeAll { cal.startOfDay(for: Date(timeIntervalSince1970: $0["b"] as! Double)) < today }
+        // keep about six months of daily numbers
+        let keep = Set(out.keys.sorted().suffix(183))
+        out = out.filter { keep.contains($0.key) }
+        d.set(pts, forKey: "lueur.locPoints"); d.set(out, forKey: "lueur.locDays"); d.set(votes, forKey: "lueur.homeVotes")
+    }
+
+    var days: [String: [String: Double]] { reduceFinishedDays(); return d.dictionary(forKey: "lueur.locDays") as? [String: [String: Double]] ?? [:] }
+
+    func wipe() {
+        lm.stopMonitoringVisits(); lm.stopMonitoringSignificantLocationChanges()
+        for k in ["lueur.locPoints", "lueur.locDays", "lueur.homeVotes", "lueur.locSalt"] { d.removeObject(forKey: k) }
     }
 }

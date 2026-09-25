@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
     permissions = [
         Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS]),
         Permission(alias = "activity", strings = [Manifest.permission.ACTIVITY_RECOGNITION]),
+        Permission(alias = "location", strings = [Manifest.permission.ACCESS_COARSE_LOCATION]),
     ]
 )
 class LueurHealthPlugin : Plugin() {
@@ -46,6 +47,8 @@ class LueurHealthPlugin : Plugin() {
             ret.put("usageAccess", Collector.hasUsageAccess(ctx))
             ret.put("activity", Build.VERSION.SDK_INT < 29 || getPermissionState("activity") == PermissionState.GRANTED)
             ret.put("notifications", Build.VERSION.SDK_INT < 33 || getPermissionState("notifications") == PermissionState.GRANTED)
+            ret.put("location", LocationDay.hasPermission(ctx, background = false))
+            ret.put("locationAlways", LocationDay.hasPermission(ctx, background = true))
             ret.put("debug", DemoSeeder.isDebug(ctx))
             // what the background check would see right now (sensor signals only)
             ret.put("sensorShifts", DriftCheck.shiftedCount(Collector.load(ctx)))
@@ -99,6 +102,30 @@ class LueurHealthPlugin : Plugin() {
     @PermissionCallback
     private fun onNotifications(call: PluginCall) {
         call.resolve(JSObject().put("granted", getPermissionState("notifications") == PermissionState.GRANTED))
+    }
+
+    /** Step 1: coarse location while in use. Step 2 (Android 10+): "Allow all the time" lives in Settings. */
+    @PluginMethod
+    fun requestLocation(call: PluginCall) {
+        if (!LocationDay.hasPermission(context, background = false)) { requestPermissionForAlias("location", call, "onLocation"); return }
+        openBackgroundLocationSettings(call)
+    }
+
+    @PermissionCallback
+    private fun onLocation(call: PluginCall) {
+        if (!LocationDay.hasPermission(context, background = false)) { call.resolve(JSObject().put("granted", false)); return }
+        openBackgroundLocationSettings(call)
+    }
+
+    private fun openBackgroundLocationSettings(call: PluginCall) {
+        if (Build.VERSION.SDK_INT >= 29 && !LocationDay.hasPermission(context, background = true)) {
+            // Android only grants "all the time" from the app's permission page
+            val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName))
+            runCatching { activity.startActivity(i) }
+            call.resolve(JSObject().put("granted", false).put("needsSettings", true)); return
+        }
+        scope.launch(Dispatchers.IO) { LocationDay.sample(context) }
+        call.resolve(JSObject().put("granted", true))
     }
 
     @PluginMethod
@@ -171,6 +198,7 @@ class LueurHealthPlugin : Plugin() {
     @PluginMethod
     fun wipe(call: PluginCall) {
         Collector.wipe(context)
+        LocationDay.wipe(context)
         call.resolve()
     }
 }

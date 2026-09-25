@@ -28,6 +28,10 @@
 	<string>Lueur reads your steps, sleep, active minutes, resting heart rate, heart rate variability, time in daylight and any moods you log, only on this iPhone, to notice when your routine drifts from your own usual. Nothing leaves the device.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Only used in the demo build to add sample data. The real app never writes to Health.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>With Always, iOS tells Lueur when you arrive at or leave a place, even when the app is closed, using very little battery. Each day becomes three numbers (places, time at home, how far you ranged) and the locations are deleted. Nothing leaves your iPhone.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Lueur counts how many places you visit and how much of the day you spend at home, to notice when that drifts from your usual. Each day is reduced to three numbers on this iPhone and the locations are deleted.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
