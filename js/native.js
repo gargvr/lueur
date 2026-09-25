@@ -18,6 +18,7 @@ export const native = {
   wipe: safe(() => P.wipe()),
   debugSeed: safe(() => P.debugSeed()),
   requestLocation: safe(() => P.requestLocation()),
+  openTimeline: safe(() => P.openTimeline()),
   // Returns Lueur-shaped days: { date, steps, sleepMin, onset, source }
   sync: safe(async (days = 60) => {
     const r = await P.sync({ days });

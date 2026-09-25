@@ -1,7 +1,7 @@
 import { kv, allDays, putDays, upsertDay, getDay, clearDays, wipeAll, exportAll, prune, RETENTION_DAYS } from "./store.js";
 import { analyze, stateCopy, buildSummary, SIGNALS, CONFIG, CONTEXT_TAGS, isoDate, addDays, fmtDur, fmtClock } from "./engine.js";
 import { generate, PERSONAS } from "./demo.js";
-import { parseCSV, detectFitbitKaggle, fitbitIds, fromFitbitKaggle, fromLueurCSV, fromFitbitTakeout, fromAppleHealth, TEMPLATE_CSV } from "./importers.js";
+import { parseCSV, detectFitbitKaggle, fitbitIds, fromFitbitKaggle, fromLueurCSV, fromFitbitTakeout, fromAppleHealth, TEMPLATE_CSV, isTimeline, fromTimeline } from "./importers.js";
 import { startPlaces, stopPlaces } from "./sensing.js";
 import { isNative, native, platform } from "./native.js";
 import { MODELS, hasWebGPU, loadModel, isLoaded, loadedModel, aiMessage, templateMessage, attempts } from "./slm.js";
@@ -133,6 +133,7 @@ function connectRows() {
         ? "Steps (every iPhone counts them), plus sleep, active minutes, resting heart rate, heart rate variability and time in daylight from an Apple Watch or any app that writes to Health, and moods you log in Health. Read-only. iOS lets you choose each one."
         : "Apple Health isn't available on this device.", s.healthRequested ? "Asked" : false, "nConnectHC", "Connect")}
       ${row("Places and time at home", "iOS tells Lueur when you arrive at or leave a place. Each day becomes three numbers (places, time at home, how far you ranged) and the locations are deleted. Choose <b>Always</b> when asked.", s.locationAlways ? true : s.location ? "While using" : false, "nLocation", "Allow")}
+      ${row("Past places (optional)", "Bring in your Google Maps Timeline so Lueur knows your usual from day one. You export it; Lueur keeps only daily numbers.", false, "pastPlaces", "Add")}
       ${row("Gentle notes", "At most one quiet note a week, delivered silently to Notification Center.", s.notifications, "nNotify", "Allow")}`;
   }
   const row = (title, desc, ok, act, label) => `<div class="toggle-row"><div class="txt"><b>${title}</b><span class="small muted">${desc}</span></div>
@@ -144,6 +145,7 @@ function connectRows() {
     ${row("Sleep, without a wearable", "Estimates your night from how long the screen stays off. Android calls this Usage access; only screen on/off times are read, never app content.", s.usageAccess, "nUsage", "Open settings")}
     ${s.stepSensor ? row("Steps, from this phone", "Uses the phone's own step counter, checked about once an hour.", s.activity, "nActivity", "Allow") : ""}
     ${row("Places and time at home", "A coarse location about once an hour. Each day becomes three numbers (places, time at home, how far you ranged) and the locations are deleted. Choose <b>Allow all the time</b> on the next screen.", s.locationAlways ? true : false, "nLocation", s.location ? "Allow all the time" : "Allow")}
+    ${row("Past places (optional)", "Bring in your Google Maps Timeline so Lueur knows your usual from day one. You export it; Lueur keeps only daily numbers.", false, "pastPlaces", "Add")}
     ${row("Gentle notes", "At most one quiet notification a week, only after a shift that lasts. No sound.", s.notifications, "nNotify", "Allow")}`;
 }
 
@@ -506,6 +508,21 @@ function sheetHTML() {
       <div class="card">${connectRows()}</div>
       <button class="btn block" data-act="nDone">Done</button>`;
   }
+  if (s.type === "pastPlaces") {
+    const android = platform === "android";
+    body = `<h2>Bring in past places</h2>
+      <p class="muted small">Google keeps your Timeline only on your phone, and no app can read it. You can hand Lueur a copy in about 30 seconds.</p>
+      <ol class="list small">
+        ${android
+          ? `<li>Tap <b>Open Timeline settings</b> below, or go to Settings › Location › Location services › <b>Timeline</b>.</li><li>Tap <b>Export Timeline data</b> and save the file.</li>`
+          : `<li>Open <b>Google Maps</b> › your profile › <b>Your Timeline</b> › ⋯ › Location and privacy settings.</li><li>Tap <b>Export Timeline data</b> and save it to Files.</li>`}
+        <li>Come back and tap <b>Choose the file</b>.</li>
+      </ol>
+      ${android ? `<button class="btn quiet block" data-act="openTimeline">Open Timeline settings</button>` : ""}
+      <label class="btn block" style="position:relative">Choose the file<input type="file" accept=".json,application/json" style="position:absolute;inset:0;opacity:0;cursor:pointer" data-act="files"></label>
+      ${s.error ? `<p class="small" style="color:#A8674A">${esc(s.error)}</p>` : ""}
+      <p class="tiny muted">Read on this phone. Each day becomes places, time at home and range; the coordinates are thrown away. Older Google Takeout location files work too.</p>`;
+  }
   if (s.type === "wipe") {
     body = `<h2>Delete everything?</h2><p class="muted">This erases all days, check-ins, your trusted person and settings from this phone. It can't be undone.</p>
       <div class="row wrap"><button class="btn warm" data-act="wipeYes">Delete everything</button><button class="btn ghost" data-act="close">Keep my data</button></div>`;
@@ -582,7 +599,11 @@ async function handleFiles(files) {
 
   let days = [];
   if (appleDays) days = days.concat(appleDays);
-  if (jsons.length) days = days.concat(fromFitbitTakeout(jsons));
+  const timeline = jsons.filter(j => isTimeline(j.data));
+  const fitbitJson = jsons.filter(j => !isTimeline(j.data));
+  let timelineDays = 0;
+  if (timeline.length) { const t = fromTimeline(timeline.map(j => j.data)); timelineDays = t.length; days = days.concat(t); }
+  if (fitbitJson.length) days = days.concat(fromFitbitTakeout(fitbitJson));
   const lueur = csvs.filter(c => c.kind === "lueur");
   lueur.forEach(c => { days = days.concat(fromLueurCSV(c.rows)); });
   const fitbit = csvs.filter(c => c.kind && c.kind !== "lueur");
@@ -593,7 +614,16 @@ async function handleFiles(files) {
     if (ids.length > 1) { S.sheet.pending = { fitbit, days }; S.sheet.ids = ids; S.sheet.progress = null; render(); return; }
     days = days.concat(fromFitbitKaggle(fitbit, ids[0]));
   }
+  if (timelineDays && days.length === timelineDays) { await finishPlaces(days); return; }
   await finishImport(days, fitbit.length ? "Fitbit data" : appleDays ? "Apple Health data" : "Imported data");
+}
+
+// Past places merge into whatever is already there, without changing the data label.
+async function finishPlaces(days) {
+  await putDays(days);
+  await saveSettings({ consent: { ...S.settings.consent, places: true } });
+  S.sheet = null; await refresh();
+  toast(`Added ${days.length} days of past places. Coordinates were not kept.`);
 }
 
 async function finishImport(days, label) {
@@ -689,6 +719,8 @@ async function act(name, arg, el, ev) {
       setTimeout(async () => { await nativeStatus(); render(); }, 2500);
       break;
     }
+    case "pastPlaces": S.sheet = { type: "pastPlaces" }; render(); break;
+    case "openTimeline": await native.openTimeline(); break;
     case "nNotify": await native.requestNotifications(); await nativeStatus(); render(); break;
     case "nSeed": { const r = await native.debugSeed(); if (r?.seeded) { toast(`Wrote ${r.seeded} sample days to ${platform === "ios" ? "Apple Health" : "Health Connect"}`); await nativeSync({ quiet: false }); await refresh(); } break; }
     case "nPreview": await native.previewNotification(); toast("Sent a sample note"); break;

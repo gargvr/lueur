@@ -128,6 +128,17 @@ class LueurHealthPlugin : Plugin() {
         call.resolve(JSObject().put("granted", true))
     }
 
+    /** Opens the Timeline settings where "Export Timeline data" lives (falls back to Location settings). */
+    @PluginMethod
+    fun openTimeline(call: PluginCall) {
+        val tries = listOf(
+            Intent("com.google.android.gms.location.settings.LOCATION_HISTORY"),
+            Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS),
+        )
+        for (i in tries) if (runCatching { activity.startActivity(i) }.isSuccess) break
+        call.resolve()
+    }
+
     @PluginMethod
     fun requestActivity(call: PluginCall) {
         if (Build.VERSION.SDK_INT < 29 || getPermissionState("activity") == PermissionState.GRANTED) {

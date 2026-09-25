@@ -198,3 +198,100 @@ export async function fromAppleHealth(file, onProgress) {
 }
 
 export const TEMPLATE_CSV = "date,sleep_minutes,bedtime,steps,places,mood,energy\n2026-09-01,440,23:20,8200,3,4,4\n";
+
+// ---------- 5. Google Maps Timeline export (past places) ----------
+// Handles the on-device exports (Android: { semanticSegments: [...] }, iPhone: a bare array)
+// and the older Takeout files (Semantic Location History "timelineObjects", Records.json).
+// Everything is reduced here, on the phone, to three numbers a day (places, % of the day at
+// home, range in km); coordinates are never stored.
+const DAY_MS = 86400000;
+const wall = s => { const m = String(s).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/); return m ? Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4] || "00"}Z`) : NaN; };
+function latLngOf(v) {
+  if (v == null) return null;
+  if (typeof v === "object") {
+    if (v.latitudeE7 != null) return [v.latitudeE7 / 1e7, v.longitudeE7 / 1e7];
+    if (v.latLng) return latLngOf(v.latLng);
+    if (v.latitude != null) return [+v.latitude, +v.longitude];
+  }
+  const m = String(v).replace(/^geo:/, "").match(/(-?\d+(?:\.\d+)?)°?\s*,\s*(-?\d+(?:\.\d+)?)/);
+  return m ? [+m[1], +m[2]] : null;
+}
+
+export function isTimeline(data) {
+  const arr = Array.isArray(data) ? data : data?.semanticSegments || data?.timelineObjects || data?.locations;
+  if (!Array.isArray(arr) || !arr.length) return false;
+  const x = arr.find(o => o && typeof o === "object") || {};
+  return !!(x.visit || x.activity || x.timelinePath || x.placeVisit || x.activitySegment || x.latitudeE7 != null);
+}
+
+export function fromTimeline(files) {
+  const visits = [];   // { a, b, ll, home }
+  const points = [];   // { t, ll }
+  for (const data of files) {
+    if (data?.locations) {                                     // Records.json
+      for (const r of data.locations) {
+        const t = r.timestamp ? wall(r.timestamp) : +r.timestampMs + 0;
+        const ll = latLngOf(r); if (ll && !isNaN(t)) points.push({ t, ll });
+      }
+      continue;
+    }
+    const segs = Array.isArray(data) ? data : data?.semanticSegments || data?.timelineObjects || [];
+    for (const s of segs) {
+      if (s.placeVisit) {                                      // legacy Semantic Location History
+        const pv = s.placeVisit, ll = latLngOf(pv.location);
+        const a = wall(pv.duration?.startTimestamp), b = wall(pv.duration?.endTimestamp);
+        if (ll && a < b) visits.push({ a, b, ll, home: /HOME/i.test(pv.location?.semanticType || "") });
+        continue;
+      }
+      const a = wall(s.startTime), b = wall(s.endTime);
+      if (s.visit) {
+        const tc = s.visit.topCandidate || {};
+        const ll = latLngOf(tc.placeLocation || tc.placeLocation?.latLng);
+        if (ll && a < b) visits.push({ a, b, ll, home: /HOME/i.test(tc.semanticType || "") });
+      }
+      for (const p of s.timelinePath || []) {
+        const ll = latLngOf(p.point); const t = wall(p.time);
+        if (ll && !isNaN(t)) points.push({ t, ll });
+      }
+    }
+  }
+  if (!visits.length && !points.length) return [];
+
+  // Home: Google's own label if present, otherwise the spot most often occupied at 03:00.
+  const cellOf = ll => `${ll[0].toFixed(3)},${ll[1].toFixed(3)}`;
+  let homeCells = new Set(visits.filter(v => v.home).map(v => cellOf(v.ll)));
+  if (!homeCells.size) {
+    const votes = new Map();
+    for (const v of visits) for (let d = Math.floor(v.a / DAY_MS); d <= Math.floor(v.b / DAY_MS); d++) {
+      const three = d * DAY_MS + 3 * 3600000; if (v.a <= three && v.b >= three) votes.set(cellOf(v.ll), (votes.get(cellOf(v.ll)) || 0) + 1);
+    }
+    const best = [...votes].sort((x, y) => y[1] - x[1])[0]; if (best) homeCells = new Set([best[0]]);
+  }
+
+  const days = new Map();
+  const get = d => { if (!days.has(d)) days.set(d, { cells: new Set(), home: 0, pts: [] }); return days.get(d); };
+  const key = d => new Date(d * DAY_MS).toISOString().slice(0, 10);
+  for (const v of visits) {
+    for (let d = Math.floor(v.a / DAY_MS); d <= Math.floor((v.b - 1) / DAY_MS); d++) {
+      const day = get(key(d));
+      day.cells.add(cellOf(v.ll)); day.pts.push(v.ll);
+      if (homeCells.has(cellOf(v.ll))) day.home += Math.min(v.b, (d + 1) * DAY_MS) - Math.max(v.a, d * DAY_MS);
+    }
+  }
+  for (const p of points) get(key(Math.floor(p.t / DAY_MS))).pts.push(p.ll);
+
+  const out = [];
+  for (const [date, d] of days) {
+    if (d.pts.length < 2 && !d.cells.size) continue;
+    const mLat = d.pts.reduce((s, p) => s + p[0], 0) / d.pts.length, mLon = d.pts.reduce((s, p) => s + p[1], 0) / d.pts.length;
+    const kx = 111.32 * Math.cos(mLat * Math.PI / 180);
+    const rg = Math.sqrt(d.pts.reduce((s, p) => s + ((p[1] - mLon) * kx) ** 2 + ((p[0] - mLat) * 110.57) ** 2, 0) / d.pts.length);
+    const row = { date, source: "timeline", rangeKm: Math.round(rg * 10) / 10 };
+    if (d.cells.size) row.places = d.cells.size;
+    if (homeCells.size && d.cells.size) row.homeStay = Math.min(100, Math.round(100 * d.home / DAY_MS));
+    out.push(row);
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  out.pop(); // the export's last day is only partly covered; keeping it would look like a shift
+  return out;
+}

@@ -153,6 +153,19 @@ Tested on the iPhone 17 Pro simulator (iOS 26):
 - Sample data flows into Lueur and flags 7 shifted signals.
 - "Why am I seeing this?" lists each one in plain words.
 
+## Past places from Google Maps Timeline
+
+No app can read Google Timeline: since 2024 it lives only on the phone and has no API. Lueur offers a 30-second hand-over instead: **Privacy → Past places → Add**.
+- **Android:** Lueur opens Timeline settings, the person taps *Export Timeline data*, then picks the file.
+- **iPhone:** Google Maps › Your Timeline › Export.
+
+`fromTimeline()` in `js/importers.js` reads all three formats:
+- the Android on-device export (`semanticSegments`),
+- the iPhone export (a bare array with `geo:` URIs),
+- older Takeout files (`timelineObjects`, `Records.json`).
+
+Each day is reduced to places, % of the day at home and range (Google's HOME label, or the spot occupied at 03:00), and the coordinates are discarded. The export's final, partial day is dropped.
+
 ## Limits a browser imposes
 
 A web page cannot sense in the background and cannot read screen time or sleep directly. Lueur therefore:
