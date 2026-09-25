@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lueur</string>
+    <string name="title_activity_main">Lueur</string>
+    <string name="package_name">ch.lueur.app</string>
+    <string name="custom_url_scheme">ch.lueur.app</string>
+</resources>

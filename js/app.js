@@ -3,6 +3,7 @@ import { analyze, stateCopy, buildSummary, SIGNALS, CONFIG, CONTEXT_TAGS, isoDat
 import { generate, PERSONAS } from "./demo.js";
 import { parseCSV, detectFitbitKaggle, fitbitIds, fromFitbitKaggle, fromLueurCSV, fromFitbitTakeout, fromAppleHealth, TEMPLATE_CSV } from "./importers.js";
 import { startPlaces, stopPlaces } from "./sensing.js";
+import { isNative, native, platform } from "./native.js";
 import { MODELS, hasWebGPU, loadModel, isLoaded, loadedModel, aiMessage, templateMessage, attempts } from "./slm.js";
 
 const $app = document.getElementById("app");
@@ -10,7 +11,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 
 const DEFAULTS = {
   onboarded: false, step: 0,
-  consent: { sleep: false, steps: false, places: false, checkin: false, model: false, agreedAt: null },
+  consent: { sleep: false, steps: false, places: false, checkin: false, heart: false, daylight: false, model: false, agreedAt: null },
   trusted: { name: "", contact: "" },
   name: "", under25: false, goalsDone: {}, snoozeUntil: null, dataLabel: null,
 };
@@ -29,7 +30,7 @@ const I = {
 // ---------------- data ----------------
 function enabledSources() {
   const c = S.settings.consent;
-  return ["sleep", "steps", "places", "checkin"].filter(k => c[k]);
+  return ["sleep", "steps", "places", "checkin", "heart", "daylight"].filter(k => c[k]);
 }
 async function saveSettings(patch) {
   S.settings = { ...S.settings, ...patch };
@@ -45,6 +46,26 @@ async function refresh({ regenerate = true } = {}) {
   render();
 }
 const today = () => isoDate(new Date());
+const inDemo = () => /^(Demo|Real data)/.test(S.settings.dataLabel || "");
+
+// ---------------- native (Android app) ----------------
+S.nativeStatus = null;
+async function nativeStatus() { S.nativeStatus = isNative ? await native.status() : null; return S.nativeStatus; }
+async function nativeSync({ quiet = true } = {}) {
+  if (!isNative || inDemo()) return 0;
+  const days = await native.sync(60);
+  if (days && days.length) {
+    const have = new Map((await allDays()).map(d => [d.date, d]));
+    for (const d of days) {
+      // a mood logged in Apple Health counts as a check-in, unless the person checked in here too
+      if (d.moodHealth != null && have.get(d.date)?.mood == null) d.mood = Math.round(d.moodHealth * 10) / 10;
+      delete d.moodHealth;
+    }
+    await putDays(days);
+  }
+  if (!quiet) toast(days?.length ? `Synced ${days.length} days from this phone` : "Nothing to sync yet. Data builds up day by day.");
+  return days?.length || 0;
+}
 const lastDate = () => S.days.length ? S.days[S.days.length - 1].date : today();
 
 // ---------------- toasts ----------------
@@ -101,6 +122,27 @@ function bigChart(sig) {
     <text x="${x(recentStart)}" y="${H - 6}">last 14 days</text>
     <path d="${path}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
   </svg>`;
+}
+
+function connectRows() {
+  const s = S.nativeStatus || {};
+  if (platform === "ios") {
+    const row = (title, desc, ok, act, label) => `<div class="toggle-row"><div class="txt"><b>${title}</b><span class="small muted">${desc}</span></div>
+      ${ok ? `<span class="ai-tag">${ok === true ? "Connected" : ok}</span>` : `<button class="btn quiet" style="min-height:40px;padding:10px 16px" data-act="${act}">${label}</button>`}</div>`;
+    return `${row("Apple Health", s.health === "available"
+        ? "Steps (every iPhone counts them), plus sleep, active minutes, resting heart rate, heart rate variability and time in daylight from an Apple Watch or any app that writes to Health, and moods you log in Health. Read-only. iOS lets you choose each one."
+        : "Apple Health isn't available on this device.", s.healthRequested ? "Asked" : false, "nConnectHC", "Connect")}
+      ${row("Gentle notes", "At most one quiet note a week, delivered silently to Notification Center.", s.notifications, "nNotify", "Allow")}`;
+  }
+  const row = (title, desc, ok, act, label) => `<div class="toggle-row"><div class="txt"><b>${title}</b><span class="small muted">${desc}</span></div>
+    ${ok ? `<span class="ai-tag">Connected</span>` : `<button class="btn quiet" style="min-height:40px;padding:10px 16px" data-act="${act}">${label}</button>`}</div>`;
+  const hcDesc = s.healthConnect === "available" ? "Steps and sleep from any band or health app that syncs to Health Connect (Fitbit, Samsung, Oura, Withings, Xiaomi and more)."
+    : s.healthConnect === "update_required" ? "Health Connect needs installing or updating from the Play Store first."
+    : "Health Connect isn't available on this phone. The options below work without it.";
+  return `${row("Health Connect", hcDesc, s.hcSteps || s.hcSleep, "nConnectHC", s.healthConnect === "update_required" ? "Install" : "Connect")}
+    ${row("Sleep, without a wearable", "Estimates your night from how long the screen stays off. Android calls this Usage access; only screen on/off times are read, never app content.", s.usageAccess, "nUsage", "Open settings")}
+    ${s.stepSensor ? row("Steps, from this phone", "Uses the phone's own step counter, checked about once an hour.", s.activity, "nActivity", "Allow") : ""}
+    ${row("Gentle notes", "At most one quiet notification a week, only after a shift that lasts. No sound.", s.notifications, "nNotify", "Allow")}`;
 }
 
 // ---------------- screens ----------------
@@ -264,14 +306,21 @@ function privacyScreen() {
   return `${topbar()}
   <div class="stack-lg">
     <div class="stack"><h1>Your data stays here</h1>
-      <p class="muted">Lueur has no server and no account. Everything below lives only in this browser on this phone.</p></div>
+      <p class="muted">Lueur has no server and no account. Everything below lives only ${isNative ? "inside this app" : "in this browser"} on this phone.</p></div>
     <div class="card"><dl class="kv"><dt>Days stored</dt><dd>${counts.days}</dd><dt>Nights of sleep</dt><dd>${counts.withSleep}</dd><dt>Check-ins</dt><dd>${counts.withCheckin}</dd><dt>Places</dt><dd>Only a daily count; never coordinates</dd><dt>Consent given</dt><dd>${c.agreedAt ? esc(new Date(c.agreedAt).toLocaleDateString("en-CH")) : "Not yet"}</dd></dl></div>
 
+    ${isNative ? `<div class="card"><div class="row between"><h3>On this phone</h3><button class="linkbtn small" data-act="nSync">Sync now</button></div>
+      <p class="small muted">Read-only. Lueur never writes to ${platform === "ios" ? "Apple Health" : "Health Connect"} and never sends anything off the phone.</p>${connectRows()}
+      ${S.nativeStatus?.notifications ? `<button class="linkbtn small" data-act="nPreview">Show what a note looks like</button>` : ""}
+      ${S.nativeStatus?.debug && (S.nativeStatus?.hcSteps || S.nativeStatus?.hcSleep || platform === "ios") ? `<button class="linkbtn small" data-act="nSeed">Demo build: fill ${platform === "ios" ? "Apple Health" : "Health Connect"} with 6 weeks of sample data</button>` : ""}</div>` : ""}
+
     <div class="card"><h3>What Lueur may notice</h3><p class="small muted">Change your mind any time. Turning a signal off stops using it straight away.</p>
-      ${toggle("sleep", "Sleep", "Duration, bedtime and regularity, from a file you import.")}
-      ${toggle("steps", "Movement", "Daily steps, from a file you import.")}
+      ${toggle("sleep", "Sleep", `Duration, bedtime and regularity, ${platform === "ios" ? "from Apple Health" : isNative ? "from Health Connect or this phone" : "from a file you import"}.`)}
+      ${toggle("steps", "Movement", `Daily steps${platform === "ios" ? " and active minutes, from Apple Health" : isNative ? ", from Health Connect or this phone" : ", from a file you import"}.`)}
       ${toggle("places", "Places", "While Lueur is open, counts different places per day. Coordinates are discarded.")}
       ${toggle("checkin", "Daily check-in", "Two taps for mood and energy.")}
+      ${platform === "ios" || S.days.some(d => d.restingHR != null || d.hrv != null) ? toggle("heart", "Heart", "Resting heart rate and heart rate variability, from a watch or ring.") : ""}
+      ${platform === "ios" || S.days.some(d => d.daylight != null) ? toggle("daylight", "Daylight", "Minutes spent in daylight, measured by Apple Watch.") : ""}
     </div>
 
     <div class="card stack"><div class="row between"><h3>On-device AI</h3><span class="ai-tag">${isLoaded() ? "Ready" : "Off"}</span></div>
@@ -337,7 +386,7 @@ function onboarding() {
      <div class="stack"><button class="btn block" data-act="next">Continue</button><button class="linkbtn" data-act="back">Back</button></div>`,
     `<div class="stack"><p class="eyebrow">Your choice</p><h1>What may Lueur notice?</h1><p class="muted small">Everything starts off. Turn on only what you're comfortable with.</p></div>
      <div class="card">
-      ${[["sleep", "Sleep", "From a sleep tracker file you import"], ["steps", "Movement", "Daily steps, from a file you import"], ["places", "Places", "A daily count while Lueur is open; never where"], ["checkin", "Daily check-in", "Two taps: mood and energy"]].map(([k, t, d]) =>
+      ${[["sleep", "Sleep", platform === "ios" ? "From Apple Health: an Apple Watch or any sleep app" : isNative ? "From Health Connect, or estimated from your screen's night-time pattern" : "From a sleep tracker file you import"], ["steps", "Movement", platform === "ios" ? "Steps and active minutes from Apple Health; every iPhone counts steps" : isNative ? "Daily steps from Health Connect or this phone" : "Daily steps, from a file you import"], ...(platform === "ios" ? [["heart", "Heart", "Resting heart rate and heart rate variability, from Apple Watch"], ["daylight", "Daylight", "Minutes in daylight, measured by Apple Watch"]] : []), ["places", "Places", "A daily count while Lueur is open; never where"], ["checkin", "Daily check-in", "Two taps: mood and energy"]].map(([k, t, d]) =>
         `<div class="toggle-row"><div class="txt"><b>${t}</b><span class="small muted">${d}</span></div><label class="toggle"><input type="checkbox" data-act="consent" data-arg="${k}" ${c[k] ? "checked" : ""} aria-label="${t}"><span></span></label></div>`).join("")}
      </div>
      <label class="row small" style="align-items:flex-start"><input type="checkbox" id="agree" data-act="agree" ${c.agreedAt ? "checked" : ""} style="margin-top:4px;width:20px;height:20px">
@@ -355,6 +404,7 @@ function onboarding() {
     `<div class="stack"><p class="eyebrow">Almost there</p><h1>Where should Lueur start?</h1>
      <p class="muted">Lueur needs about three weeks of history to know your usual. You can bring history in, or try it with example data.</p></div>
      <div class="stack">
+      ${isNative ? `<button class="card lake" data-act="nConnect" style="text-align:left;font:inherit;color:inherit;cursor:pointer;border:0"><h3>Use this phone</h3><p class="small">${platform === "ios" ? "Connect Apple Health. Works with just an iPhone, and with an Apple Watch it notices more." : "Connect Health Connect or let Lueur learn from the phone itself, even without a wearable."} Everything stays on the phone.</p></button>` : ""}
       ${Object.entries(PERSONAS).map(([k, p]) => `<button class="card soft" data-act="demo" data-arg="${k}" style="text-align:left;font:inherit;color:inherit;cursor:pointer"><h3>Try the demo: ${esc(p.label)}</h3><p class="small muted">${esc(p.blurb)}</p></button>`).join("")}
 <button class="card soft" data-act="demo" data-arg="real" style="text-align:left;font:inherit;color:inherit;cursor:pointer"><h3>Try with real data</h3><p class="small muted">Five months of one person's actual Fitbit sleep and steps, with their daily mood and fatigue ratings (PMData, Simula Research Lab, 2020).</p></button>
       <button class="card soft" data-act="import" style="text-align:left;font:inherit;color:inherit;cursor:pointer"><h3>Import my history</h3><p class="small muted">Fitbit, Apple Health, or a CSV. Read on this phone, never uploaded.</p></button>
@@ -446,6 +496,12 @@ function sheetHTML() {
   if (s.type === "demo") {
     body = `<h2>Load demo data</h2><p class="small muted">This replaces what's stored now.</p>
       <div class="stack">${Object.entries(PERSONAS).map(([k, p]) => `<button class="card soft" data-act="demo" data-arg="${k}" style="text-align:left;font:inherit;color:inherit;cursor:pointer"><h3>${esc(p.label)}</h3><p class="small muted">${esc(p.blurb)}</p></button>`).join("")}<button class="card soft" data-act="demo" data-arg="real" style="text-align:left;font:inherit;color:inherit;cursor:pointer"><h3>A real person</h3><p class="small muted">Five months of one person's actual Fitbit sleep and steps, with their daily mood and fatigue ratings (PMData, Simula Research Lab, 2020).</p></button></div>`;
+  }
+  if (s.type === "connect") {
+    body = `<h2>Use this phone</h2>
+      <p class="muted small">Turn on what you're comfortable with. You can change any of it later in Privacy.</p>
+      <div class="card">${connectRows()}</div>
+      <button class="btn block" data-act="nDone">Done</button>`;
   }
   if (s.type === "wipe") {
     body = `<h2>Delete everything?</h2><p class="muted">This erases all days, check-ins, your trusted person and settings from this phone. It can't be undone.</p>
@@ -586,7 +642,7 @@ async function act(name, arg, el, ev) {
       await upsertDay(today(), { tags: [...tags] }); await refresh({ regenerate: false }); break;
     }
     case "goal": { const done = { ...S.settings.goalsDone }; const t = today(); done[t] = [...new Set([...(done[t] || []), arg])]; await saveSettings({ goalsDone: done }); render(); toast("Nice. That counts."); break; }
-    case "snooze": await saveSettings({ snoozeUntil: addDays(today(), 3) }); render(); toast("Okay. Lueur will check in again in a few days."); break;
+    case "snooze": await saveSettings({ snoozeUntil: addDays(today(), 3) }); native.setPrefs({ snoozeUntil: addDays(today(), 3) }); render(); toast("Okay. Lueur will check in again in a few days."); break;
     case "share": S.sheet = { type: "share", arg }; render(); break;
     case "doShare": {
       const text = document.getElementById("share-text").value;
@@ -610,7 +666,22 @@ async function act(name, arg, el, ev) {
       a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
       a.download = `lueur-export-${today()}.json`; a.click(); break;
     }
-    case "wipeYes": stopPlaces(); await wipeAll(); S.settings = structuredClone(DEFAULTS); S.days = []; S.sheet = null; S.tab = "today"; await kv.set("settings", S.settings); render(); toast("Everything deleted"); break;
+    case "wipeYes": stopPlaces(); await native.wipe(); await wipeAll(); S.settings = structuredClone(DEFAULTS); S.days = []; S.sheet = null; S.tab = "today"; await kv.set("settings", S.settings); render(); toast("Everything deleted"); break;
+    case "nConnect": {
+      if (inDemo()) { await clearDays(); await saveSettings({ dataLabel: null }); }
+      const consent = { ...S.settings.consent, sleep: true, steps: true, checkin: true, agreedAt: S.settings.consent.agreedAt || new Date().toISOString() };
+      if (platform === "ios") { consent.heart = true; consent.daylight = true; }
+      await saveSettings({ consent });
+      await nativeStatus(); S.sheet = { type: "connect" }; render(); break;
+    }
+    case "nConnectHC": { const r = await native.requestHealth(); await nativeStatus(); render(); if (r?.granted) { await nativeSync({ quiet: false }); await refresh(); } break; }
+    case "nUsage": S.awaitingUsage = true; await native.openUsageAccess(); break;
+    case "nActivity": await native.requestActivity(); await nativeStatus(); render(); break;
+    case "nNotify": await native.requestNotifications(); await nativeStatus(); render(); break;
+    case "nSeed": { const r = await native.debugSeed(); if (r?.seeded) { toast(`Wrote ${r.seeded} sample days to ${platform === "ios" ? "Apple Health" : "Health Connect"}`); await nativeSync({ quiet: false }); await refresh(); } break; }
+    case "nPreview": await native.previewNotification(); toast("Sent a sample note"); break;
+    case "nSync": await nativeSync({ quiet: false }); await nativeStatus(); await refresh(); break;
+    case "nDone": await saveSettings({ onboarded: true }); S.sheet = null; S.tab = "today"; await nativeSync(); await refresh(); break;
     case "close": S.sheet = null; render(); break;
     case "scrim": if (ev.target === el) { S.sheet = null; render(); } break;
   }
@@ -637,7 +708,14 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && S.sheet) {
   S.settings = { ...structuredClone(DEFAULTS), ...((await kv.get("settings")) || {}) };
   S.settings.consent = { ...DEFAULTS.consent, ...S.settings.consent };
   try { await prune(); } catch {}
+  if (isNative) { await nativeStatus(); if (S.settings.onboarded) await nativeSync(); }
   await refresh();
   if (S.settings.onboarded && S.settings.consent.places) startPlaces(() => refresh({ regenerate: false }));
-  if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  if (!isNative && "serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  // coming back from Android settings, or reopening the app: re-check and sync
+  if (isNative) document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible") return;
+    await nativeStatus();
+    if (S.settings.onboarded) { await nativeSync(); await refresh({ regenerate: false }); } else render();
+  });
 })();

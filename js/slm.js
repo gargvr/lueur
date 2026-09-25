@@ -63,7 +63,7 @@ const CONTRADICTS = /\b(improv\w*|better|more consistent|increas\w*|nap\w*|diet|
 const TELLS_FEELINGS = /\byou(?:'re| are|'ve been| have been)?\s+(?:feel|feeling)\b/i;
 const AREA_WORDS = { "shorter sleep": /sleep/i, "longer sleep": /sleep/i, "later bedtimes": /bed|evening|night|late/i, "earlier bedtimes": /bed|evening|early/i,
   "a less regular sleep rhythm": /sleep|rhythm|regular/i, "less movement": /mov|active|walk|step/i, "fewer places visited": /place|out|around/i,
-  "lower mood in check-ins": /mood|check/i, "lower energy in check-ins": /energy|check/i };
+  "lower mood in check-ins": /mood|check/i, "a higher resting heart rate": /heart/i, "lower heart rate variability": /heart|variab/i, "less time in daylight": /daylight|outside|outdoors|sun/i, "fewer active minutes": /activ|exercis|mov/i, "lower energy in check-ins": /energy|check/i };
 // Returns null if the note is acceptable, otherwise the reason it was rejected.
 export function rejectReason(text, areas = []) {
   const words = text.split(/\s+/).filter(Boolean).length;
@@ -91,6 +91,10 @@ export function areasFor(result) {
     irregularity: () => "a less regular sleep rhythm",
     steps: () => "less movement",
     places: () => "fewer places visited",
+    restingHR: () => "a higher resting heart rate",
+    hrv: () => "lower heart rate variability",
+    daylight: () => "less time in daylight",
+    exercise: () => "fewer active minutes",
     mood: () => "lower mood in check-ins",
     energy: () => "lower energy in check-ins",
   };

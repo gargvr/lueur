@@ -79,6 +79,80 @@ For each signal (sleep duration, bedtime, sleep regularity, steps, places, mood 
   - LifeSnaps (Zenodo 7229547, CC BY 4.0) for calibrating within-person variability.
   - No open, login-free dataset has depression labels, so Lueur claims only "change from your own usual", never clinical accuracy.
 
+## Android app (passive)
+
+The same web app, wrapped with Capacitor 8, plus a small Kotlin layer in `android/app/src/main/java/ch/lueur/app/`:
+
+| File | Job |
+|---|---|
+| `Collector.kt` | Reads **Health Connect** (steps and sleep only, read-only), so any band that syncs there works: Fitbit, Samsung, Oura, Withings, Xiaomi and others. Without a wearable, it estimates sleep from the **screen's night-time off/on pattern** (Usage access; only screen on/off times, never app content) and reads **steps from the phone's own step counter**. A real tracker always wins over the phone's estimate. |
+| `DailyWorker.kt` | WorkManager job, about hourly: samples the step counter; once a day collects; once a day after 10:00 checks for a sustained shift and shows **at most one silent notification a week**. It never names a condition and never contacts anyone. |
+| `DriftCheck.kt` | The same rules as `engine.js` (sensor signals only). Verified to agree with the JS engine on the same data. |
+| `LueurHealthPlugin.kt` | The bridge the web UI calls (`js/native.js`). |
+| `DemoSeeder.kt` | **Debug builds only**: writes 6 weeks of sample steps and sleep into Health Connect so the whole path can be demoed without a wearable. Release builds have no write permission. |
+
+Build (needs JDK 21, Android SDK 36, Node 22+):
+
+```bash
+npm install
+npm run android:sync
+cd android && ./gradlew assembleDebug
+```
+
+The APK lands in `android/app/build/outputs/apk/debug/app-debug.apk`. Install with `adb install -r` or copy it to the phone.
+
+Tested on the Android 15 emulator:
+- Health Connect's own permission screens list exactly **Sleep** and **Steps**, then ask for past data.
+- Sample data flows from Health Connect into Lueur, and the engine flags the shift.
+- The native check and the JS engine agree (3 shifted signals).
+- The notification lands in Android's **Silent** section.
+
+Not yet verified: the screen-pattern sleep estimate needs a real phone left overnight, because a fresh emulator has no night history.
+
+## iPhone app (passive, Apple Health)
+
+Same web app, wrapped with Capacitor 8 (Swift Package Manager, no CocoaPods). The Swift layer lives in `ios/App/App/LueurHealthPlugin.swift`.
+
+**What it reads from Apple Health** (read-only; iOS shows a per-type permission sheet):
+
+| Signal | Needs Apple Watch? | Evidence |
+|---|---|---|
+| Steps | No, every iPhone counts them | Bizzozero-Peroni 2024 |
+| Sleep (asleep stages, merged across sources) | Watch or a sleep app | Fang 2021, Baglioni 2011 |
+| Exercise minutes | Yes | Pearce 2022, *JAMA Psychiatry*: 15 cohorts, n=191,130; half the recommended activity went with 18% lower depression risk |
+| Resting heart rate | Yes | RADAR-MDD (Condominas 2025) |
+| Heart rate variability (SDNN) | Yes | Koch 2019 (a small effect, so one input among many) |
+| Time in daylight (iOS 17+) | Yes | Burns 2021/2023, UK Biobank |
+| State of Mind moods logged in Health (iOS 18+) | No | Used as a check-in when the person didn't check in here |
+
+**Deliberately not read:**
+- **PHQ-9 / GAD-7 scores** (HKScoredAssessment, iOS 18). These are clinical screening instruments. Reading them would make Lueur depression-screening software, which is a medical device.
+- **Respiratory rate** and **wrist temperature**. Drift in these mostly signals illness, so a flag would look like a medical alert.
+- **Screen Time**. Apple doesn't expose it to apps as numbers.
+
+**Background:**
+- `HKObserverQuery` plus `enableBackgroundDelivery(.daily)` on sleep and steps. This needs the `com.apple.developer.healthkit.background-delivery` entitlement.
+- When new data arrives, the Swift port of the rules (`LueurDrift`) runs.
+- At most once a week it posts a **passive** local notification: no sound, no banner.
+
+**Demo build:** the Privacy tab has "fill Apple Health with 6 weeks of sample data". It writes steps, sleep, resting HR, HRV and State of Mind. HealthKit refuses app writes for exercise minutes and time in daylight, since those are Watch-only.
+
+**Build and run** (simulator):
+
+```bash
+npm run build:web && npx cap sync ios
+cd ios/App && xcodebuild -project App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -derivedDataPath build build
+```
+
+- A real iPhone needs an Apple ID set as the signing team in Xcode.
+- A free account works for 7 days per install.
+- TestFlight needs the paid Apple Developer Program.
+
+Tested on the iPhone 17 Pro simulator (iOS 26):
+- Apple's Health sheet lists each type.
+- Sample data flows into Lueur and flags 7 shifted signals.
+- "Why am I seeing this?" lists each one in plain words.
+
 ## Limits a browser imposes
 
 A web page cannot sense in the background and cannot read screen time or sleep directly. Lueur therefore:

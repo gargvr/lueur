@@ -55,6 +55,12 @@ Prototype-level assessment for the Geneva {ai} Hackathon 2026. This is not legal
 | Crisis | The model is never used for crisis triage; 143, 144 and HUG are always one tap away |
 | Location privacy | Coordinates are never stored: they are rounded, salted and hashed, and only a count is kept |
 
+## 4b. Signals we chose not to read
+
+- **Apple Health PHQ-9 / GAD-7 scores** (HKScoredAssessment, iOS 18). These are validated clinical screening instruments with a risk output. Ingesting or trending them would give Lueur a medical purpose (screening or monitoring), so we never request them.
+- **Respiratory rate** and **sleeping wrist temperature**. Drift in these mostly reflects illness, so flagging it would read as a physiological diagnosis.
+- **Resting heart rate and HRV** are read, but always presented as "how rested your body is", never with cardiac wording or thresholds. Only the person's own change over two weeks is shown.
+
 ## 5. Professional secrecy (StGB Art. 321)
 
 - Art. 321 binds doctors, psychologists and their assistants once information is confided to them. The app publisher is not bound by it, and Lueur never sends anything to a professional.

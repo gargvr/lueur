@@ -15,7 +15,12 @@ export const SIGNALS = [
   { key: "onset",        label: "Bedtime",         bad: "up",   floor: 25,  fmt: fmtClock, source: "sleep" },
   { key: "irregularity", label: "Sleep rhythm",    bad: "up",   floor: 12,  fmt: v => `±${Math.round(v)} min`, source: "sleep", derived: true },
   { key: "steps",        label: "Movement",        bad: "down", floor: 900, fmt: v => `${fmtInt(v)} steps`, source: "steps" },
+  { key: "exercise",     label: "Active minutes", bad: "down", floor: 5, fmt: v => `${Math.round(v)} min`, source: "steps" },
   { key: "places",       label: "Places",          bad: "down", floor: 0.7, fmt: v => `${(Math.round(v * 10) / 10).toString()} a day`, source: "places" },
+  // Apple Watch / wearables (added for the iPhone app; Health Connect can supply them too)
+  { key: "restingHR",    label: "Resting heart", bad: "up",   floor: 2,   fmt: v => `${Math.round(v)} bpm`, source: "heart" },
+  { key: "hrv",          label: "Heart variability", bad: "down", floor: 5, fmt: v => `${Math.round(v)} ms`, source: "heart" },
+  { key: "daylight",     label: "Daylight",      bad: "down", floor: 10,  fmt: v => `${Math.round(v)} min`, source: "daylight" },
   { key: "mood",         label: "Mood",            bad: "down", floor: 0.5, fmt: v => `${(Math.round(v * 10) / 10)} / 5`, source: "checkin" },
   { key: "energy",       label: "Energy",          bad: "down", floor: 0.5, fmt: v => `${(Math.round(v * 10) / 10)} / 5`, source: "checkin" },
 ];
@@ -143,7 +148,11 @@ export function factFor(s) {
     case "irregularity": return `Sleep rhythm: bedtime has varied by about ±${Math.round(r)} minutes night to night, versus your usual ±${Math.round(c)}.`;
     case "steps": return `Movement: about ${fmtInt(r)} steps a day, down from your usual ${fmtInt(c)}.`;
     case "places": return `Places: about ${Math.round(r * 10) / 10} places a day, fewer than your usual ${Math.round(c * 10) / 10}.`;
-    case "mood": return `Mood check-ins: around ${Math.round(r * 10) / 10} out of 5, lower than your usual ${Math.round(c * 10) / 10}.`;
+    case "exercise": return `Active minutes: about ${Math.round(r)} a day, down from your usual ${Math.round(c)}.`;
+    case "restingHR": return `Resting heart rate, a sign of how rested your body is: around ${Math.round(r)} bpm lately, higher than your usual ${Math.round(c)}.`;
+    case "hrv": return `Heart rate variability: around ${Math.round(r)} ms lately, lower than your usual ${Math.round(c)}.`;
+    case "daylight": return `Daylight: about ${Math.round(r)} minutes outside a day, down from your usual ${Math.round(c)}.`;
+    case "mood": return `Mood (your check-ins and any moods logged in Health): around ${Math.round(r * 10) / 10} out of 5, lower than your usual ${Math.round(c * 10) / 10}.`;
     case "energy": return `Energy check-ins: around ${Math.round(r * 10) / 10} out of 5, lower than your usual ${Math.round(c * 10) / 10}.`;
   }
 }

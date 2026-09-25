@@ -1,2 +1,17 @@
 .claude/
 .DS_Store
+node_modules/
+www/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+ios/App/build/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/capacitor-cordova-android-plugins/build/
+*.xcuserstate
+xcuserdata/

@@ -1,0 +1,6 @@
+{
+  "appId": "ch.lueur.app",
+  "appName": "Lueur",
+  "webDir": "www",
+  "android": { "allowMixedContent": false, "captureInput": true, "webContentsDebuggingEnabled": true }
+}
