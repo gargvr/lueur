@@ -1,0 +1,15 @@
+{
+  "name": "Lueur",
+  "short_name": "Lueur",
+  "description": "Notices gentle shifts in your own rhythm and helps you reach the right person, early. Everything stays on your phone.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EEF1F3",
+  "theme_color": "#EEF1F3",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
